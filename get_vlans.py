@@ -37,7 +37,7 @@ def main():
     sitevlans = []
     text_files = [f for f in os.listdir(path) if f.endswith(file_extension)]
 
-    outfile = open("get-vlan-output.txt","w")
+    outfile = open("get-vlan-output.csv","w")
     outfile.write("Vlan Key, Hostname, Vlan Number, Vlan Name, Vlan IP, Vlan Mask, Vlan Description, Vlan Interface Count, VRF, Vlan Notes, Exclude dot1x (Yes/No) \n")
 
 
