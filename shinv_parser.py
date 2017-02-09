@@ -55,12 +55,12 @@ def read_files_in_dir(dir, ext):
 def open_file(filename, mode):
 
     # Mode = r | w | a | r+
-
     try:
         file_handle = open(filename, mode)
 
     except IOError:
         print "IOError" + str(IOError)
+        print "Could not open file. Please make sure all result files are closed!"
 
     return file_handle
 
@@ -80,9 +80,11 @@ def get_hostname(data):
     #hostname_spclchar = u | p | d
     hostname_spclchar = oneOf("_ - .")
 
-    hostname_value = Combine(a + ZeroOrMore(hostname_spclchar) + ZeroOrMore(a + hostname_spclchar))
+    #hostname_value = Combine(a + ZeroOrMore(hostname_spclchar) + ZeroOrMore(a + hostname_spclchar))
+    hostname_value = Word(srange("[A-Za-z0-9_\-]"))
 
     hostname_line = hostname_key + hostname_value.setResultsName("hostname")
+
 
     hostname_token = hostname_line.scanString(data)
 
@@ -93,36 +95,39 @@ def get_hostname(data):
 
 def get_device_sn(data):
 
-    if re.search("Processor Board ID(.*)", shlines[i]):
-        tmp = shlines[i].strip()
-        tmp = shlines[i].split()
-        id_sn = tmp[3]
+    serial_number = []
 
-    elif re.search("Motherboard serial number(.*)", shlines[i]):
-        tmp = shlines[i].strip()
-        tmp = shlines[i].split()
-        id_sn = tmp[-1]
+    p = Literal('Processor Board ID')
+    ml = Literal('Motherboard serial number')
+    mu = Literal('Motherboard Serial Sumber')
+    sn = Word(alphanums)
+    colon = Suppress(":")
 
+    key = p | ml | mu
 
-    elif re.search("Motherboard Serial Number(.*)", shlines[i]):
-        tmp = shlines[i].strip()
-        tmp = shlines[i].split()
-        id_sn = tmp[-1]
+    line = key + colon + sn.setResultsName("sn")
 
+    line_token = line.scanString(data)
+
+    for l in line_token:
+        item_sn = l[0].sn.strip()
+        serial_number.append(item_sn)
+
+    return serial_number
 
 def main():
 
     # Timestamp the start of the run so that a total run time can be calcuated at the end
     start_time = datetime.datetime.now()
 
+    # Keep a list of any files that did not have any show inventory information
     no_inventory = []
+
+    # Mandatory argument passed to script - either a filename or a directory of files to process
     path = arguments.filename
-    good_path = False
     file_list = []
 
     if os.path.exists(path):
-        #print os.path.exists(path)
-        good_path = True
         if os.path.isdir(path):
             print "Processing Directory: " + path
             file_list = read_files_in_dir(path, ".log")
@@ -132,10 +137,8 @@ def main():
             results_dir = os.path.join(path, results_fn)
             results_num_files = str(len(file_list))
 
-
         else:
             print "Processing File: " + path
-            # read_file function returns a file handle
             file_list.append(path)
             fn, fext = os.path.splitext(path)
             results_fn = fn + "-results.csv"
@@ -160,20 +163,28 @@ def main():
 
         #print "Processing device file: " + fil
 
+        # open_file function returns a file handle
         fh = open_file(fil, 'r')
+
+        # Read the file contents into a variable for parsing
         file_contents = fh.read()
 
+        #print file_contents
+
+        # Get the hostname of the device
         hostname = get_hostname(file_contents)
         print hostname
 
-        #x = raw_input("Press any key to continue")
+        # Get the main SN of the device
+        dev_serial_num = get_device_sn(file_contents)
+        # print dev_serial_num
+
 
         n = Literal('NAME')
         d = Literal('DESCR')
         p = Literal('PID')
         v = Literal('VID')
         s = Literal('SN')
-
 
         colon = Suppress(':')
         comma = Suppress(',')
@@ -183,50 +194,60 @@ def main():
 
         newline = Suppress(LineEnd())
 
+        line = n + colon + inv_value.setResultsName("name") + comma + d + colon + inv_value.setResultsName("desc") \
+               + newline \
+               + p + colon + inv_value.setResultsName("pid") + comma + v + colon + inv_value.setResultsName("vid") \
+               + comma + s + colon + inv_value.setResultsName("sn") + ZeroOrMore(newline)
 
-        line = n + colon + inv_value.setResultsName("name") + comma + d + colon + inv_value.setResultsName("desc") + newline + p + colon + inv_value.setResultsName("pid") + comma + v + colon + inv_value.setResultsName("vid") + comma + s + colon + inv_value.setResultsName("sn")
         line.setDefaultWhitespaceChars(' \t')
+
         ml = line.scanString(file_contents)
 
         line_count = 0
 
         for x in ml:
             line_count += 1
-              # print "\nXXXXXXXXXXXXXXXXXXXXXXXXX"
-              # print x
-              # print "\n"
-              # print x[0]
-              # print "XXXXXXXXXXXXXXXXXXXXXXXXXXXXX\n"
-              # print x[0].name
-              # print x[0].desc
-              # print x[0].pid
-              # print x[0].vid
-              # print x[0].sn
-            row = [hostname, fil, x[0].name, x[0].desc, x[0].pid, x[0].vid, x[0].sn, line_count, 'Device SN']
+            row = [hostname, fil, x[0].name, x[0].desc, x[0].pid, x[0].vid, x[0].sn, line_count, dev_serial_num]
             csv_writer.writerow(row)
 
         print "Device has " + str(line_count) + " inventory items"
         if line_count == 0:
             no_inventory.append(fil)
 
-
-
+        # Close show command file
         fh.close()
 
-    csv_results_fh.close()
 
 
-    print "Number of files processed: " + results_num_files
-    print "List of files/devices without inventory information: " + str(no_inventory)
-    print "Results file created in " + results_dir
+    msg = "\nNumber of files processed: " + results_num_files
+    print msg
+    csv_writer.writerow("\n\n\n")
+    csv_writer.writerow(msg)
+
+    if len(no_inventory) > 0:
+        msg = "Number of files/devices without inventory information: " + str(len(no_inventory))
+        print msg
+        csv_writer.writerow(msg)
+
+        msg = "List of files/devices without inventory information: "
+        print msg
+        csv_writer.writerow(msg)
+
+        for file in no_inventory:
+            print "\t" + file
+            csv_writer.writerow("\t" + file)
+
+    msg = "\nResults file created in " + results_dir
+    print msg
+    csv_writer.writerow(msg)
 
     elapsed_time = datetime.datetime.now() - start_time
-    print "Elapsed time: {}".format(elapsed_time)
+    msg = "\nElapsed time: {}".format(elapsed_time)
+    print msg
+    csv_writer.writerow(msg)
 
-
-
-
-
+    # Close results CSV file
+    csv_results_fh.close()
 
 
 # Standard call to the main() function.
