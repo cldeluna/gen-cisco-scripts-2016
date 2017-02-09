@@ -277,7 +277,7 @@ def main():
 # Standard call to the main() function.
 if __name__ == '__main__':
     if len(sys.argv) != 3:
-        print '\nUsage: get_vlans.py.py <full path to directory of files to process> <show command output file name extension (.txt, .log, etc)\nExample:  python get_vlans.py "/Users/Claudia/Box Sync/Network Transformation/Sites/North America - Year One/96-East_Peoria/show commands" "txt"\n\n'
+        print '\nUsage: get_vlans.py.py <full path to directory of files to process> <show command output file name extension (.txt, .log, etc)>\nExample:  python get_vlans.py "/Users/Claudia/Box Sync/Network Transformation/Sites/North America - Year One/96-East_Peoria/show commands" "txt"\n\n'
         sys.exit()
     else:
         main()
