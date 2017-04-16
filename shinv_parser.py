@@ -17,6 +17,8 @@ import csv
 import datetime
 from pyparsing import *
 import argparse
+import re
+import textfsm
 
 #from pyparsing import Word, Keyword, nums, OneOrMore, Optional, Suppress, Literal, alphanums, LineEnd, LineStart, Group, ParserElement
 
@@ -49,7 +51,7 @@ def read_files_in_dir(dir, ext):
         print("Directory error: " + str((winErr)))
         print sys.exit("Aborting Program Execution")
 
-    return valid_file_list
+    return valid_file_list, dir_list
 
 
 def open_file(filename, mode):
@@ -85,7 +87,6 @@ def get_hostname(data):
 
     hostname_line = hostname_key + hostname_value.setResultsName("hostname")
 
-
     hostname_token = hostname_line.scanString(data)
 
     for h in hostname_token:
@@ -97,15 +98,16 @@ def get_device_sn(data):
 
     serial_number = []
 
-    p = Literal('Processor Board ID')
+    pu = Literal('Processor Board ID')
+    pl = Literal('Processor board ID')
     ml = Literal('Motherboard serial number')
     mu = Literal('Motherboard Serial Sumber')
     sn = Word(alphanums)
     colon = Suppress(":")
 
-    key = p | ml | mu
+    key = pu | pl | ml | mu
 
-    line = key + colon + sn.setResultsName("sn")
+    line = key + ZeroOrMore(colon) + sn.setResultsName("sn")
 
     line_token = line.scanString(data)
 
@@ -114,6 +116,43 @@ def get_device_sn(data):
         serial_number.append(item_sn)
 
     return serial_number
+
+def categorize(data):
+
+    category = ''
+
+    if "Transceiver" in data:
+        category = "Optics"
+    if "Clock Module" in data:
+        category = "Clock Module"
+    if "Max Buffers" in data:
+        category = "Max Buffers"
+    if re.search(r'[P|p]ower [S|s]upply', data):
+        category = "Power Supply"
+
+    return category
+
+
+def text_fsm_parse(template_fn, data):
+
+
+    # Run the text through the FSM.
+    # The argument 'template' is a file handle and 'raw_text_data' is a
+    # string with the content from the show_inventory.txt file
+    template = open(template_fn)
+    re_table = textfsm.TextFSM(template)
+    fsm_results = re_table.ParseText(data)
+
+
+    # Display result as CSV and write it to the output file
+    # First the column headers...
+    print(re_table.header)
+
+    return fsm_results
+
+
+
+
 
 def main():
 
@@ -125,13 +164,17 @@ def main():
 
     # Mandatory argument passed to script - either a filename or a directory of files to process
     path = arguments.filename
+
     file_list = []
+    fsm_results = []
 
     if os.path.exists(path):
         if os.path.isdir(path):
             print "Processing Directory: " + path
-            file_list = read_files_in_dir(path, ".log")
+            file_list, total_files = read_files_in_dir(path, ".log")
+            print "\t Total files in directory: " + str(len(total_files))
             print "\t Valid files in directory: " + str(len(file_list))
+
             path_list = path.split(os.sep)
             results_fn = path_list[-2] + "-results.csv"
             results_dir = os.path.join(path, results_fn)
@@ -154,7 +197,7 @@ def main():
     # Open the CSV file to store results
     csv_results_fh = open_file(results_dir, 'wb')
     csv_writer = csv.writer(csv_results_fh, quoting=csv.QUOTE_MINIMAL)
-    header = ['hostname', 'filename', 'NAME', 'DESC', 'PID', 'VID', 'SN', 'Device Inventory Total', 'Device SN']
+    header = ['hostname', 'filename', 'NAME', 'DESC', 'PID', 'VID', 'SN', 'Device Inventory Total', "Notes", 'Device SN']
     csv_writer.writerow(header)
 
     # Iterate through the valid file list. If the script was passed a filename it will be a file_list of 1
@@ -169,82 +212,133 @@ def main():
         # Read the file contents into a variable for parsing
         file_contents = fh.read()
 
-        #print file_contents
+        if arguments.textfsm:
 
-        # Get the hostname of the device
-        hostname = get_hostname(file_contents)
-        print hostname
+            # Timestamp the start of the run so that a total run time can be calcuated at the end
+            #start_time = datetime.datetime.now()
 
-        # Get the main SN of the device
-        dev_serial_num = get_device_sn(file_contents)
-        # print dev_serial_num
+            # Load the input file to a variable
 
+            raw_text_data = fh.read()
+            fh.close()
 
-        n = Literal('NAME')
-        d = Literal('DESCR')
-        p = Literal('PID')
-        v = Literal('VID')
-        s = Literal('SN')
+            template = "textfsm_ios_shinv.template"
 
-        colon = Suppress(':')
-        comma = Suppress(',')
+            output_filename = "shinv_textfsm_output.csv"
 
-        inv_nonquote = Word(alphanums + "-" + "/")
-        inv_value = QuotedString('"') | inv_nonquote
+            # the results are written to a CSV file
+            outfile_name = open(output_filename, "w+")
+            outfile = outfile_name
 
-        newline = Suppress(LineEnd())
+            fsm_results_tmp = text_fsm_parse(template, raw_text_data)
 
-        line = n + colon + inv_value.setResultsName("name") + comma + d + colon + inv_value.setResultsName("desc") \
-               + newline \
-               + p + colon + inv_value.setResultsName("pid") + comma + v + colon + inv_value.setResultsName("vid") \
-               + comma + s + colon + inv_value.setResultsName("sn") + ZeroOrMore(newline)
+            fsm_results.append(fsm_results_tmp)
 
-        line.setDefaultWhitespaceChars(' \t')
+        else:
+            # Get the hostname of the device
+            hostname = get_hostname(file_contents)
+            print hostname,
 
-        ml = line.scanString(file_contents)
-
-        line_count = 0
-
-        for x in ml:
-            line_count += 1
-            row = [hostname, fil, x[0].name, x[0].desc, x[0].pid, x[0].vid, x[0].sn, line_count, dev_serial_num]
-            csv_writer.writerow(row)
-
-        print "Device has " + str(line_count) + " inventory items"
-        if line_count == 0:
-            no_inventory.append(fil)
-
-        # Close show command file
-        fh.close()
+            # Get the main SN of the device
+            dev_serial_num = get_device_sn(file_contents)
+            # print dev_serial_num
 
 
+            n = Literal('NAME')
+            d = Literal('DESCR')
+            p = Literal('PID')
+            v = Literal('VID')
+            s = Literal('SN')
 
-    msg = "\nNumber of files processed: " + results_num_files
-    print msg
-    csv_writer.writerow("\n\n\n")
-    csv_writer.writerow(msg)
+            colon = Suppress(':')
+            comma = Suppress(',')
 
-    if len(no_inventory) > 0:
-        msg = "Number of files/devices without inventory information: " + str(len(no_inventory))
-        print msg
-        csv_writer.writerow(msg)
+            inv_nonquote = Word(alphanums + "-" + "/")
+            inv_value = QuotedString('"') | inv_nonquote
 
-        msg = "List of files/devices without inventory information: "
-        print msg
-        csv_writer.writerow(msg)
+            newline = Suppress(LineEnd())
 
-        for file in no_inventory:
-            print "\t" + file
-            csv_writer.writerow("\t" + file)
+            line = n + colon + inv_value.setResultsName("name") + comma + d + colon + inv_value.setResultsName("desc") \
+                   + newline \
+                   + p + colon + inv_value.setResultsName("pid") + comma + v + colon + inv_value.setResultsName("vid") \
+                   + comma + s + colon + inv_value.setResultsName("sn") + ZeroOrMore(newline)
 
-    msg = "\nResults file created in " + results_dir
-    print msg
-    csv_writer.writerow(msg)
+            line.setDefaultWhitespaceChars(' \t')
+            #line.enablePackrat()
+
+            ml = line.scanString(file_contents)
+
+            line_count = 0
+
+            for x in ml:
+                line_count += 1
+                notes = categorize(x[0].desc)
+                row = [hostname, fil, x[0].name, x[0].desc, x[0].pid, x[0].vid, x[0].sn, line_count, notes, dev_serial_num]
+                csv_writer.writerow(row)
+
+
+            print "\tDevice has " + str(line_count) + " inventory items"
+            if line_count == 0:
+                no_inventory.append(fil)
+
+            # Close show command file
+            fh.close()
+
+
+            # Summary Information
+
+            print "\n"
+            print "-" * 60
+            print "-" * 60
+            msg = "Number of files processed: " + results_num_files
+            print msg
+            csv_writer.writerow("\n\n\n")
+            msg_csv_format = [msg, '', '', '', '', '', '', '', '']
+            csv_writer.writerow(msg_csv_format)
+
+            if len(no_inventory) > 0:
+                msg = "Number of files/devices without inventory information: " + str(len(no_inventory))
+                print msg
+                msg_csv_format = [msg, '', '', '', '', '', '', '', '']
+                csv_writer.writerow(msg_csv_format)
+
+                msg = "List of files/devices without inventory information: "
+                print msg
+                msg_csv_format = [msg, '', '', '', '', '', '', '', '']
+                csv_writer.writerow(msg_csv_format)
+
+                for file in no_inventory:
+                    msg = "\t" + file
+                    print msg
+                    msg_csv_format = [msg, '', '', '', '', '', '', '', '']
+                    csv_writer.writerow(msg_csv_format)
+
+            msg = "\nResults file created in " + results_dir
+            print msg
+            msg_csv_format = [msg, '', '', '', '', '', '', '', '']
+            csv_writer.writerow(msg_csv_format)
+
+
+    if arguments.textfsm:
+        # ...now all row's which were parsed by TextFSM
+        counter = 0
+        for row in fsm_results:
+            print(row)
+            for s in row:
+                outfile.write("%s;" % s)
+            outfile.write("\n")
+            counter += 1
+        print("Write %d records" % counter)
+
+
 
     elapsed_time = datetime.datetime.now() - start_time
     msg = "\nElapsed time: {}".format(elapsed_time)
     print msg
-    csv_writer.writerow(msg)
+    msg_csv_format = [msg, '', '', '', '', '', '', '', '']
+    csv_writer.writerow(msg_csv_format)
+    print "-" * 60
+    print "-" * 60
 
     # Close results CSV file
     csv_results_fh.close()
@@ -256,8 +350,8 @@ if __name__ == '__main__':
                                      epilog="Usage: ' python shinv_parser.py somefile.txt' ")
 
     parser.add_argument('filename', help='filename to parse')
-    #parser.add_argument('-a', '--all', help='Execute all exercises in week 4 assignment', action='store_true',
-    #                    default=False)
+    parser.add_argument('-t', '--textfsm', help='Parse using TextFSM Module', action='store_true', default=False)
+
     arguments = parser.parse_args()
     main()
 

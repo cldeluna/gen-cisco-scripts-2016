@@ -38,7 +38,8 @@ def main():
     text_files = [f for f in os.listdir(path) if f.endswith(file_extension)]
 
     outfile = open("get-vlan-output.csv","w")
-    outfile.write("Vlan Key, Hostname, Vlan Number, Vlan Name, Vlan IP, Vlan Mask, Vlan Description, Vlan Interface Count, VRF, Vlan Notes, Exclude dot1x (Yes/No) \n")
+    outfile.write("Vlan Key, Hostname, Vlan Number, Vlan Name, Vlan IP, Vlan Mask, Vlan Description, Vlan Interface "
+                  "Count, VRF, Vlan Notes, Exclude dot1x (Yes/No), Source File\n")
 
 
 
@@ -80,11 +81,13 @@ def main():
                 host = shlines[i]
                 host = host.rstrip()
                 # split the hostname line into two variables
+                print host
                 host1 = host.split(" ")
                 hostname = host1[1]
+                print hostname
 
                 #All switches have an inherent Vlan 1
-                vlans["1"] = [hostname, "1", "", "", "", "", 0, "", ""]
+                #vlans["1"] = [hostname, "1", "", "", "", "", 0, "", "",]
 
             # If the line in this show command file is part of the vlan configuration
             if re.match("^vlan\s+\d+", shlines[i]):
@@ -262,7 +265,8 @@ def main():
             #print vlattrib[7]
             #print vlattrib[8]
             test = str(vlattrib[6]) + "," + vlattrib[7] + "," + str(vlattrib[8])
-            outfileline = vl + "," + vlattrib[0] + "," + vlattrib[1] + "," + vlattrib[2] + "," + vlattrib[3] + "," + vlattrib[4] + "," + vlattrib[5] + "," + test + "\n"
+            outfileline = vl + "," + vlattrib[0] + "," + vlattrib[1] + "," + vlattrib[2] + "," + vlattrib[3] + "," \
+                          + vlattrib[4] + "," + vlattrib[5] + "," + test + "," + filename + "\n"
             #outfileline = vl + "," + vlattrib[0] + "," + vlattrib[1] + "," + vlattrib[2] + "," + vlattrib[3] + "," + vlattrib[4] + "," + vlattrib[5] + ","  + "\n"
             #print outfileline
             outfile.write(outfileline)
